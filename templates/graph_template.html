@@ -10436,6 +10436,7 @@ module.exports = __WEBPACK_EXTERNAL_MODULE__140__;
 // ============================================================
 // 数据
 // ============================================================
+// 默认调色板:覆盖最常见的 9 个 tag。build_graph.py 不会触碰这部分。
 const TAG_PALETTE = {
   'RAG':          { c: '#7AA2F7', label: 'RAG' },
   'GraphRAG':     { c: '#7DCFFF', label: 'GraphRAG' },
@@ -10447,6 +10448,16 @@ const TAG_PALETTE = {
   'Claude Code':  { c: '#BB9AF7', label: 'Claude Code' },
   'Transformer':  { c: '#C0CAF5', label: 'Transformer' }
 };
+
+// 由 build_graph.py 注入,覆盖未在默认 TAG_PALETTE 中的自定义 tag。
+const EXTRA_PALETTE = /*__EXTRA_PALETTE_JSON__*/{};
+
+// 兜底函数:即使 tag 不存在或为空,也能拿到合法颜色,避免 JS 崩白屏。
+function getPalette(tag) {
+  if (tag && TAG_PALETTE[tag])   return TAG_PALETTE[tag];
+  if (tag && EXTRA_PALETTE[tag]) return EXTRA_PALETTE[tag];
+  return { c: '#94a3b8', label: tag || '其他' };
+}
 
 const NODES = /*__NODES_JSON__*/[];
 
@@ -10472,8 +10483,10 @@ document.getElementById('stat-weak').textContent = EDGES.filter(e => e.strength 
 // ============================================================
 let activeTagFilter = null;
 const tagChipsEl = document.getElementById('tag-chips');
-Object.entries(TAG_PALETTE).forEach(([tag, palette]) => {
+// 迭代所有出现过的 tag(default + extra + 未知都通过 getPalette 取色)
+Object.keys(tagCounts).forEach(tag => {
   if (!tagCounts[tag]) return;
+  const palette = getPalette(tag);
   const chip = document.createElement('div');
   chip.className = 'tag-chip';
   chip.dataset.tag = tag;
@@ -10500,7 +10513,7 @@ function toggleTagFilter(tag) {
 }
 
 function applyTagFilter(tag) {
-  const palette = TAG_PALETTE[tag];
+  const palette = getPalette(tag);
   document.getElementById('filter-label').textContent = `已筛选 · ${palette.label}`;
   document.getElementById('filter-status').classList.add('show');
   if (!cy) return;
@@ -10546,7 +10559,7 @@ function showNodeDetail(nodeId) {
   document.getElementById('detail-title').textContent = node.title;
   document.getElementById('detail-link').href = node.url;
 
-  const palette = TAG_PALETTE[node.tag];
+  const palette = getPalette(node.tag);
   const tagEl = document.getElementById('detail-tag');
   tagEl.innerHTML = `<span class="dot" style="background:${palette.c}"></span>${palette.label}`;
   tagEl.style.background = palette.c + '14';
@@ -10621,7 +10634,7 @@ function initGraph() {
         label: n.short,
         title: n.title,
         tag: n.tag,
-        color: TAG_PALETTE[n.tag].c,
+        color: getPalette(n.tag).c,
         size: Math.min(32, Math.max(16, 12 + degree[n.id] * 2)),
         url: n.url
       }
@@ -10895,7 +10908,7 @@ function initGraph() {
   cy.on('mouseover', 'node', evt => {
     const n = evt.target;
     showTooltip(
-      `<b>${n.data('num')}</b> ${n.data('title')}<div class="meta">${TAG_PALETTE[n.data('tag')].label} · degree ${degree[parseInt(n.id())]}</div>`,
+      `<b>${n.data('num')}</b> ${n.data('title')}<div class="meta">${getPalette(n.data('tag')).label} · degree ${degree[parseInt(n.id())]}</div>`,
       evt.renderedPosition
     );
     if (selectedNodeId === null && activeTagFilter === null) {

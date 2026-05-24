@@ -254,4 +254,4 @@ A: `data-src` 提取时 URL 被截断了。必须保留 `?wx_fmt=png&from=appmsg
 - [references/graph-design-spec.md](references/graph-design-spec.md) — 图谱可视化的设计规格（Tokyo Night 配色 + fcose 调参）
 - [scripts/fetch_article.py](scripts/fetch_article.py) — 微信 HTML 解析
 - [scripts/build_graph.py](scripts/build_graph.py) — 拉表 + 注入模板
-- [templates/graph_template.html](templates/graph_template.html) — 图谱 HTML 模板（数据用 `__GRAPH_DATA__` 占位符）
+- [templates/graph_template.html](templates/graph_template.html) — 图谱 HTML 模板（占位符 `/*__NODES_JSON__*/[]`、`/*__EDGES_JSON__*/[]`、`/*__EXTRA_PALETTE_JSON__*/{}` 由 build_graph.py 替换）

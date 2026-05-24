@@ -17,6 +17,6 @@ venv/
 *.swp
 .DS_Store
 
-# 抓取缓存
-/tmp/wechat_*.html
+# 抓取缓存(系统 /tmp 不在 git 跟踪范围内,这里只忽略仓库内的临时副本)
+wechat_*.html
 *.json.tmp

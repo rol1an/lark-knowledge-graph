@@ -13,6 +13,7 @@ lark-knowledge-graph / fetch_article.py
 """
 import argparse
 import datetime
+import html as html_lib
 import json
 import re
 import subprocess
@@ -112,9 +113,11 @@ def html_to_text(content_html: str):
     text = re.sub(r'</(p|div|section|h\d|li|blockquote|br)[^>]*>', '\n', text)
     text = re.sub(r'<br\s*/?>', '\n', text)
     text = re.sub(r'<[^>]+>', '', text)
-    for old, new in [('&nbsp;', ' '), ('&amp;', '&'), ('&lt;', '<'), ('&gt;', '>'),
-                     ('&quot;', '"'), ('&#39;', "'")]:
-        text = text.replace(old, new)
+    # 用标准库 html.unescape 处理所有命名实体(&nbsp; &middot; &mdash; ...)
+    # 和数字实体(&#39; &#x2014; ...),比手工列表全面得多
+    text = html_lib.unescape(text)
+    # &nbsp; ( ) 转回普通空格,避免后续 split/strip 时不识别
+    text = text.replace(' ', ' ')
     text = re.sub(r'\n\s*\n', '\n\n', text)
     text = re.sub(r'[ \t]+', ' ', text)
     return text.strip()

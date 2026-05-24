@@ -107,23 +107,35 @@ def short_title(title, max_len=12):
     return t
 
 
-def infer_tag_palette(tags):
-    """根据当前数据里出现的 tag 集合,从 Tokyo Night 调色板里挑色."""
-    base_colors = [
-        ('#7AA2F7', '雾蓝'),
-        ('#7DCFFF', '浅青'),
-        ('#9ECE6A', '苔绿'),
-        ('#73DACA', '薄荷'),
-        ('#E0AF68', '沙金'),
-        ('#E5C07B', '米黄'),
-        ('#F7768E', '玫粉'),
-        ('#BB9AF7', '灰紫'),
-        ('#C0CAF5', '月白')
-    ]
+# 模板里默认 TAG_PALETTE 已经覆盖的 tag(和 graph_template.html 同步).
+# 在这 9 个集合里的 tag 不用注入 EXTRA_PALETTE,直接走默认调色.
+DEFAULT_PALETTE_KEYS = {
+    'RAG', 'GraphRAG', 'Agent', 'Agent Memory',
+    'Agent工程', 'Agent框架', 'Agent 设计',
+    'Claude Code', 'Transformer'
+}
+
+# Tokyo Night 调色板,给未覆盖的 tag 按顺序分配
+EXTRA_COLOR_ROTATION = [
+    '#7AA2F7', '#7DCFFF', '#9ECE6A', '#73DACA',
+    '#E0AF68', '#E5C07B', '#F7768E', '#BB9AF7', '#C0CAF5'
+]
+
+
+def build_extra_palette(tags):
+    """为不在默认 TAG_PALETTE 里的 tag 生成补充调色板.
+
+    返回 {tag: {c, label}} 字典,模板里的 EXTRA_PALETTE 占位符注入此值.
+    模板的 getPalette() 会按 TAG_PALETTE → EXTRA_PALETTE → 灰色兜底的顺序取色,
+    所以这里只需要补充未覆盖的 tag.
+    """
+    extras = sorted(t for t in tags if t and t not in DEFAULT_PALETTE_KEYS)
     palette = {}
-    for i, tag in enumerate(sorted(tags)):
-        color, _ = base_colors[i % len(base_colors)]
-        palette[tag] = {'c': color, 'label': tag}
+    for i, tag in enumerate(extras):
+        palette[tag] = {
+            'c': EXTRA_COLOR_ROTATION[i % len(EXTRA_COLOR_ROTATION)],
+            'label': tag
+        }
     return palette
 
 
@@ -183,9 +195,15 @@ def build(config_path: Path, output_path: Path):
 
     print(f"[3/4] 节点 {len(nodes)} · 边 {len(edges)}")
 
-    # 自动按当前 tag 分配 Tokyo Night 配色
+    # 给未在默认 TAG_PALETTE 覆盖的 tag 生成补充调色板
     tags_in_use = {n['tag'] for n in nodes if n['tag']}
-    palette = infer_tag_palette(tags_in_use)
+    extra_palette = build_extra_palette(tags_in_use)
+    extra_tags = sorted(extra_palette.keys())
+    if extra_tags:
+        print(f"      [+] 补充调色板覆盖 {len(extra_tags)} 个自定义 tag: {extra_tags}")
+    empty_tag_nodes = [n for n in nodes if not n['tag']]
+    if empty_tag_nodes:
+        print(f"      [!] {len(empty_tag_nodes)} 个节点的 tag 为空, 将用灰色'其他'显示")
 
     # 读模板 + 注入
     template_path = REPO_ROOT / 'templates' / 'graph_template.html'
@@ -193,33 +211,16 @@ def build(config_path: Path, output_path: Path):
 
     nodes_js = json.dumps(nodes, ensure_ascii=False, indent=2)
     edges_js = json.dumps(edges, ensure_ascii=False, indent=2)
+    extra_js = json.dumps(extra_palette, ensure_ascii=False, indent=2)
 
-    # 替换占位符
+    # 全部走占位符替换,不再用脆弱的正则解析模板
     template = template.replace('/*__NODES_JSON__*/[]', nodes_js)
     template = template.replace('/*__EDGES_JSON__*/[]', edges_js)
-
-    # 同时替换 TAG_PALETTE(可选,如果想完全跟数据动态)
-    # 这里保留模板里写死的 TAG_PALETTE,因为常见 tag 已经覆盖
-    # 如果你的 tag 集合差异大,在此处再生成 palette JS 字面量
-    if any(t not in extract_template_tags(template) for t in tags_in_use):
-        palette_js = 'const TAG_PALETTE = ' + json.dumps(palette, ensure_ascii=False, indent=2) + ';'
-        template = re.sub(
-            r'const TAG_PALETTE = \{[^}]+\};',
-            palette_js,
-            template, count=1, flags=re.DOTALL
-        )
+    template = template.replace('/*__EXTRA_PALETTE_JSON__*/{}', extra_js)
 
     output_path.write_text(template, encoding='utf-8')
     print(f"[4/4] ✅ 写入 {output_path}  ({output_path.stat().st_size/1024:.1f} KB)")
     print(f"     用浏览器打开: file://{output_path.resolve()}")
-
-
-def extract_template_tags(template):
-    """从模板的 TAG_PALETTE 块里抽出已经定义的 tag key."""
-    m = re.search(r"const TAG_PALETTE = \{([^}]+)\};", template, re.DOTALL)
-    if not m:
-        return set()
-    return set(re.findall(r"'([^']+)':\s*\{", m.group(1)))
 
 
 def main():
