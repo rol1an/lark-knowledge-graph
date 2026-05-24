@@ -15,9 +15,11 @@ import argparse
 import datetime
 import html as html_lib
 import json
+import os
 import re
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 
@@ -93,17 +95,33 @@ def extract_images_with_context(content_html: str):
 
 
 def extract_emphasis(content_html: str):
-    """提取原文的强调标记(粗体/彩色文本)以便重构时还原."""
+    """提取原文的强调标记(粗体/彩色文本)以便重构时还原.
+
+    彩色文本必须用"按标签名匹配闭合标签"的写法,不能用 (.*?)<:
+    后者遇到嵌套 <b><span> 会在第一个内部 < 处停止,捕获到空串,丢失彩色加粗文本.
+    """
     bolds = []
     for m in re.finditer(r'<(?:strong|b)[^>]*>(.*?)</(?:strong|b)>', content_html, re.DOTALL):
         text = re.sub(r'<[^>]+>', '', m.group(1)).strip()
+        text = html_lib.unescape(text)
         if text and len(text) < 200:
             bolds.append(text)
+
     colors = []
-    for m in re.finditer(r'style="[^"]*color\s*:\s*([^;"]+)[^"]*"[^>]*>(.*?)<', content_html):
-        text = re.sub(r'<[^>]+>', '', m.group(2)).strip()
+    # 用 \1 反向引用捕获到的标签名 (span/strong/b/font/...),匹配完整闭合标签
+    # 仍然不能 100% 处理同名嵌套 (<span color=A><span color=B>...</span></span>),
+    # 但能正确处理常见场景 <span color=red><b>X</b></span>.
+    pattern = re.compile(
+        r'<(\w+)[^>]*style="[^"]*color\s*:\s*([^;"]+)[^"]*"[^>]*>(.*?)</\1>',
+        re.DOTALL
+    )
+    for m in pattern.finditer(content_html):
+        color = m.group(2).strip()
+        # 内容里可能还嵌着 <b>/<em> 等,strip 掉只留文本
+        text = re.sub(r'<[^>]+>', '', m.group(3)).strip()
+        text = html_lib.unescape(text)
         if text and len(text) < 200:
-            colors.append({'color': m.group(1).strip(), 'text': text})
+            colors.append({'color': color, 'text': text})
     return {'bold': bolds, 'colored': colors}
 
 
@@ -127,7 +145,10 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('url', help='微信公众号文章 URL')
     parser.add_argument('--output', type=Path, help='输出 JSON 路径(默认 stdout)')
-    parser.add_argument('--html-cache', type=Path, default=Path('/tmp/wechat_article.html'))
+    # 缓存路径带 PID,避免并发执行时互相覆盖. 用 tempfile.gettempdir() 跨平台兼容.
+    default_cache = Path(tempfile.gettempdir()) / f'wechat_article_{os.getpid()}.html'
+    parser.add_argument('--html-cache', type=Path, default=default_cache,
+                        help=f'HTML 缓存路径(默认 {default_cache})')
     args = parser.parse_args()
 
     print(f"[1/4] 抓取 HTML → {args.html_cache}", file=sys.stderr)

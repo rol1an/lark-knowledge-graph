@@ -10803,11 +10803,14 @@ function initGraph() {
   // ============================================================
   const anchors = new Map();    // id -> {x, y}（layout 给出的目标位置）
   const phases  = new Map();    // id -> {px, py, fx, fy, ax, ay}（每节点独立参数）
-  let bobRunning = false;
+  let bobGen = 0;                // generation 计数器:每次 initBob 自增,旧 tick 通过 gen 不等退出
   let bobStart = 0;
   const draggingIds = new Set();
 
   function initBob() {
+    bobGen += 1;
+    const myGen = bobGen;        // 闭包捕获本次循环的代号
+
     cy.nodes().forEach(n => {
       const id = n.id();
       const pos = n.position();
@@ -10824,27 +10827,28 @@ function initGraph() {
       });
     });
     bobStart = performance.now();
-    bobRunning = true;
-    requestAnimationFrame(bobTick);
-  }
 
-  function bobTick(now) {
-    if (!bobRunning) return;
-    const t = now - bobStart;
-    cy.batch(() => {
-      cy.nodes().forEach(n => {
-        const id = n.id();
-        if (draggingIds.has(id)) return; // 拖拽中跳过
-        const a = anchors.get(id);
-        const p = phases.get(id);
-        if (!a || !p) return;
-        n.position({
-          x: a.x + Math.sin(t * p.fx + p.px) * p.ax,
-          y: a.y + Math.sin(t * p.fy + p.py) * p.ay
+    function tick(now) {
+      // 关键:若 bobGen 已被新一轮 initBob 自增,本次 tick 是"过期循环",立即退出.
+      // 避免每次 layoutstop 累积一个 rAF 链 → 长时间使用后帧率劣化.
+      if (myGen !== bobGen) return;
+      const t = now - bobStart;
+      cy.batch(() => {
+        cy.nodes().forEach(n => {
+          const id = n.id();
+          if (draggingIds.has(id)) return; // 拖拽中跳过
+          const a = anchors.get(id);
+          const p = phases.get(id);
+          if (!a || !p) return;
+          n.position({
+            x: a.x + Math.sin(t * p.fx + p.px) * p.ax,
+            y: a.y + Math.sin(t * p.fy + p.py) * p.ay
+          });
         });
       });
-    });
-    requestAnimationFrame(bobTick);
+      requestAnimationFrame(tick);
+    }
+    requestAnimationFrame(tick);
   }
 
   // 布局完成后启动浮沉；之后若用户重新布局也重置 anchor

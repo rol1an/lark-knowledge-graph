@@ -29,13 +29,14 @@ def run_lark(args, parse_json=True):
         sys.exit(1)
     if not parse_json:
         return proc.stdout
-    # lark-cli 默认输出 JSON,但带 [WARN] 头,需要剥离
+    # lark-cli 默认输出 JSON,但带 [WARN] 头,需要剥离.
+    # JSON 可能以 { (对象) 或 [ (数组) 开头,两个都要检测,取最早出现的位置.
     out = proc.stdout
-    json_start = out.find('{')
-    if json_start < 0:
+    candidates = [i for i in (out.find('{'), out.find('[')) if i >= 0]
+    if not candidates:
         print(f"[ERR] no JSON in output: {out[:500]}", file=sys.stderr)
         sys.exit(1)
-    return json.loads(out[json_start:])
+    return json.loads(out[min(candidates):])
 
 
 def list_records(profile, base_token, table_id):
@@ -98,10 +99,20 @@ def normalize_link(raw):
 
 
 def short_title(title, max_len=12):
-    """从全标题压缩出 12 字以内的短标签."""
-    # 去掉"NO.XXX " 前缀和冒号后的副标题
-    t = re.sub(r'^NO\.\d+\s*', '', title)
-    t = re.split(r'[:：—\-]', t, maxsplit=1)[0].strip()
+    """从全标题压缩出 12 字以内的短标签.
+
+    多级降级:
+      1. 去 NO.XXX 前缀,按冒号/破折号取第一段
+      2. 若第一段为空(标题只剩分隔符),退回去前缀后的全文
+      3. 若仍为空,用原 title
+      4. 全部为空时返回占位符 '(无标题)' —— 避免节点 label 空字符串
+    """
+    if not title:
+        return '(无标题)'
+    raw = title.strip()
+    stripped_prefix = re.sub(r'^NO\.\d+\s*', '', raw).strip()
+    first_part = re.split(r'[:：—\-]', stripped_prefix, maxsplit=1)[0].strip()
+    t = first_part or stripped_prefix or raw or '(无标题)'
     if len(t) > max_len:
         t = t[:max_len].rstrip() + '…'
     return t
@@ -115,32 +126,59 @@ DEFAULT_PALETTE_KEYS = {
     'Claude Code', 'Transformer'
 }
 
-# Tokyo Night 调色板,给未覆盖的 tag 按顺序分配
-EXTRA_COLOR_ROTATION = [
-    '#7AA2F7', '#7DCFFF', '#9ECE6A', '#73DACA',
-    '#E0AF68', '#E5C07B', '#F7768E', '#BB9AF7', '#C0CAF5'
-]
+import colorsys
+import hashlib
+
+
+def color_from_tag(tag: str) -> str:
+    """从 tag 字符串哈希出稳定的 Tokyo Night 风格颜色.
+
+    用 MD5 取色相 (0-360°),固定饱和度 ~50%、亮度 ~75% 模拟 Tokyo Night 调色板.
+    优点:无限 tag 都能拿到稳定且不易撞色的颜色,同 tag 每次构建结果一致.
+    """
+    h = int(hashlib.md5(tag.encode('utf-8')).hexdigest()[:8], 16)
+    hue = (h % 360) / 360.0
+    r, g, b = colorsys.hls_to_rgb(hue, 0.72, 0.48)  # L=0.72 偏亮, S=0.48 低饱和
+    return '#{:02X}{:02X}{:02X}'.format(int(r * 255), int(g * 255), int(b * 255))
 
 
 def build_extra_palette(tags):
     """为不在默认 TAG_PALETTE 里的 tag 生成补充调色板.
 
     返回 {tag: {c, label}} 字典,模板里的 EXTRA_PALETTE 占位符注入此值.
-    模板的 getPalette() 会按 TAG_PALETTE → EXTRA_PALETTE → 灰色兜底的顺序取色,
-    所以这里只需要补充未覆盖的 tag.
+    模板的 getPalette() 会按 TAG_PALETTE → EXTRA_PALETTE → 灰色兜底的顺序取色.
+
+    用哈希算法生成颜色,避免"固定数组循环"导致超过 9 个自定义 tag 后撞色.
     """
     extras = sorted(t for t in tags if t and t not in DEFAULT_PALETTE_KEYS)
-    palette = {}
-    for i, tag in enumerate(extras):
-        palette[tag] = {
-            'c': EXTRA_COLOR_ROTATION[i % len(EXTRA_COLOR_ROTATION)],
-            'label': tag
-        }
-    return palette
+    return {tag: {'c': color_from_tag(tag), 'label': tag} for tag in extras}
+
+
+REQUIRED_CONFIG_KEYS = [
+    'lark_profile',
+    'bitable_token',
+    'node_table_id',
+    'edge_table_id',
+]
+
+
+def load_config(config_path: Path):
+    """加载配置并校验必填字段, 给出友好错误而不是 KeyError."""
+    try:
+        config = json.loads(config_path.read_text(encoding='utf-8'))
+    except json.JSONDecodeError as e:
+        print(f"[ERR] {config_path} 不是合法 JSON: {e}", file=sys.stderr)
+        sys.exit(1)
+    missing = [k for k in REQUIRED_CONFIG_KEYS if not config.get(k)]
+    if missing:
+        print(f"[ERR] {config_path} 缺少必填字段: {missing}", file=sys.stderr)
+        print(f"      请参考 .config.example.json 补齐", file=sys.stderr)
+        sys.exit(1)
+    return config
 
 
 def build(config_path: Path, output_path: Path):
-    config = json.loads(config_path.read_text(encoding='utf-8'))
+    config = load_config(config_path)
     profile = config['lark_profile']
     base_token = config['bitable_token']
     node_table = config['node_table_id']
