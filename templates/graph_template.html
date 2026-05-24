@@ -10461,6 +10461,12 @@ EDGES.forEach(e => { degree[e.from]++; degree[e.to]++; });
 const tagCounts = {};
 NODES.forEach(n => { tagCounts[n.tag] = (tagCounts[n.tag] || 0) + 1; });
 
+// 顶部 stats 动态填充(避免和 NODES/EDGES 数据不同步)
+document.getElementById('stat-nodes').textContent = NODES.length;
+document.getElementById('stat-edges').textContent = EDGES.length;
+document.getElementById('stat-strong').textContent = EDGES.filter(e => e.strength === 'strong').length;
+document.getElementById('stat-weak').textContent = EDGES.filter(e => e.strength === 'weak').length;
+
 // ============================================================
 // 渲染侧栏 tag chips
 // ============================================================

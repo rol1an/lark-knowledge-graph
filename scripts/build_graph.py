@@ -39,18 +39,44 @@ def run_lark(args, parse_json=True):
 
 
 def list_records(profile, base_token, table_id):
-    """拉一张表的所有记录."""
-    result = run_lark([
-        'lark-cli', 'base', '+record-list',
-        '--profile', profile, '--as', 'bot',
-        '--base-token', base_token,
-        '--table-id', table_id,
-        '--output', 'json'
-    ])
-    if not result.get('ok'):
-        print(f"[ERR] record-list failed: {result}", file=sys.stderr)
-        sys.exit(1)
-    return result['data']['records']
+    """拉一张表的所有记录(自动分页).
+
+    lark-cli record-list --format json 返回的是并行数组结构:
+      data.data: 二维数组 N行 × M列 (实际值)
+      data.fields: 列名数组 (长度 M)
+      data.record_id_list: 行 record_id 数组 (长度 N)
+    本函数把它们 zip 成 [{record_id, fields: {name: value}}, ...] 格式.
+    """
+    all_records = []
+    offset = 0
+    while True:
+        result = run_lark([
+            'lark-cli', 'base', '+record-list',
+            '--profile', profile, '--as', 'bot',
+            '--base-token', base_token,
+            '--table-id', table_id,
+            '--format', 'json',
+            '--limit', '200',
+            '--offset', str(offset)
+        ])
+        if not result.get('ok'):
+            print(f"[ERR] record-list failed: {result}", file=sys.stderr)
+            sys.exit(1)
+        data = result.get('data') or {}
+        rows = data.get('data') or []
+        fields = data.get('fields') or []
+        rec_ids = data.get('record_id_list') or []
+
+        # zip 成字典列表
+        for rec_id, row in zip(rec_ids, rows):
+            row_dict = {name: value for name, value in zip(fields, row)}
+            all_records.append({'record_id': rec_id, 'fields': row_dict})
+
+        # 翻页判断
+        if len(rows) < 200 or not data.get('has_more'):
+            break
+        offset += 200
+    return all_records
 
 
 def normalize_tag(raw):
