@@ -1,0 +1,22 @@
+# 个人配置(包含飞书租户 token,绝对不提交)
+.config.json
+
+# 生成的图谱 HTML(每次跑脚本会重生成)
+article_graph.html
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# 抓取缓存
+/tmp/wechat_*.html
+*.json.tmp
